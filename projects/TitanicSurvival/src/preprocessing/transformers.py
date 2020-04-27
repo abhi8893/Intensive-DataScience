@@ -1,6 +1,8 @@
 from copy import deepcopy
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.compose import ColumnTransformer
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.preprocessing import OneHotEncoder
 
 
 class AutoFitTrans:
@@ -52,8 +54,11 @@ class NaNDropper(BaseEstimator, ClassifierMixin, AutoFitTrans):
         X: pd.DataFrame
         y: pd.Series (Default: None)
         '''
-        
-        self.nan_indices = X.loc[:, self.key].isna().any(axis=1) | y.isna()
+        self.nan_indices = X.loc[:, self.key].isna().any(axis=1)
+        if y is not None:
+            self.nan_indices = self.nan_indices | y.isna()
+
+
         return self
     
     def transform(self, X, y=None):
@@ -83,3 +88,40 @@ def modify_transformer_cols(col_trnsfrmr: ColumnTransformer, append=False, **trn
         trnsfrmrs[i] = (trnsfrmr_name, old_trnsfrmr, new_cols)
         
     return new_col_trnsfrmr
+
+
+class DecisionTreeDiscretizer(BaseEstimator, ClassifierMixin, AutoFitTrans):
+    
+    def __init__(self, max_depth=2):
+        self.max_depth = max_depth
+        self.dt = DecisionTreeClassifier(max_depth=self.max_depth)
+        
+    def fit(self, X, y):
+        self.dt.fit(X, y)
+        return self
+        
+    def transform(self, X, y=None):
+        prob = self.dt.predict_proba(X)
+        return OneHotEncoder(drop='first').fit_transform(prob)
+
+
+    
+class SimpleImputerDF(BaseEstimator, ClassifierMixin, AutoFitTrans):
+    
+    def __init__(self, keys, strategy='mean', fill_value=None):
+        self.keys = keys
+        self.strategy = strategy
+        self.fill_value = fill_value
+        
+    
+    def fit(self, X, y=None):
+        if self.fill_value is not None:
+            self.fill_value = X.loc[:, self.keys].agg(self.strategy)
+            
+        return self
+            
+            
+    def transform(self, X, y=None):
+        sel_cols = list(set(X.columns) & set(self.keys))
+        X.loc[:, sel_cols] = X.loc[:, sel_cols].apply(lambda c: c.fillna(self.fill_value[c.name]), axis=0)
+        return X
